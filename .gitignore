@@ -1,0 +1,22 @@
+# Python cache and local output
+__pycache__/
+*.py[cod]
+*.log
+
+# WorkBuddy login state and other credentials
+workbuddy-desktop.info
+*.info
+*.token
+*.pem
+*.key
+*.crt
+.env
+.env.*
+auth/
+secrets/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
