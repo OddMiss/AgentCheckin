@@ -56,3 +56,7 @@ WorkBuddy 用户：...  token：已加载（内容已隐藏）
 WorkBuddy 登录态包含访问令牌，应视为密码处理。`.gitignore` 已排除登录态、令牌、环境变量文件、私钥、缓存和日志；提交前仍建议检查暂存文件，确认不含个人信息。
 
 本项目只查询 WorkBuddy 的签到和积分信息。积分查询为只读操作，不会消耗积分。
+
+## 参考来源
+
+- 签到接口方案参考：[WorkBuddy 积分焦虑终结者：让 AI 每天自动签到领积分，一次配置永久躺赚](https://developer.cloud.tencent.com/article/2734615)
