@@ -32,6 +32,18 @@ C:\Users\<Windows 用户名>\AppData\Local\CodeBuddyExtension\Data\Public\auth\w
 
 输入账号编号可签到单个账号；如输入 `1,3` 可选择多个账号；输入 `A`、`all` 或 `0` 可签到全部已发现账号。
 
+## 新版 WorkBuddy 兼容性
+
+新版 WorkBuddy 可能会加密本机登录态。脚本会自动识别该格式，并仅在内存中调用已安装的 WorkBuddy 客户端读取所需的登录令牌；令牌和解封密钥不会写入文件或显示在控制台。
+
+这不需要打开 WorkBuddy 图形界面。脚本会短暂以后台 Node 模式启动客户端自带的 Electron 运行时，并调用其本机凭据存储能力解封登录态；令牌仅经子进程管道交给脚本，用完即释放。脚本不会修改 WorkBuddy 的登录文件、不会保存解封密钥，也不会上传令牌。
+
+默认会查找常见安装位置及本机 `D:\WorkBuddy\WorkBuddy.exe`。如果客户端安装在其他位置，可在运行前设置环境变量：
+
+```powershell
+$env:WORKBUDDY_APP_EXECUTABLE = "C:\\你的路径\\WorkBuddy.exe"
+```
+
 ## 展示示例
 
 ```text

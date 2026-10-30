@@ -12,6 +12,7 @@ WorkBuddy 每日自动签到（API 直签版）
 """
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -26,10 +27,58 @@ STATUS_URL = "https://www.codebuddy.cn/v2/billing/meter/checkin-activity-status"
 CHECKIN_URL = "https://www.codebuddy.cn/v2/billing/meter/daily-checkin"
 USER_RESOURCE_URL = "https://www.codebuddy.cn/v2/billing/meter/get-user-resource"
 CURRENT_WINDOWS_USER = os.environ.get("USERNAME") or os.path.basename(os.path.expanduser("~"))
+WORKBUDDY_APP_ENV = "WORKBUDDY_APP_EXECUTABLE"
 AUTH_PATH_PARTS = (
     "AppData", "Local", "CodeBuddyExtension", "Data", "Public", "auth",
     "workbuddy-desktop.info",
 )
+
+# WorkBuddy 5.6+ 将 accessToken 加密为 {"$wbEncrypted": 1, "envelope": "..."}。
+# 此辅助代码只让 WorkBuddy 自己的 Electron 运行时在内存中解封，并把结果通过
+# 子进程管道返回；密钥和令牌都不会写入磁盘或输出到控制台。
+WORKBUDDY_DECRYPT_HELPER = r"""
+const crypto = require("crypto");
+
+function lengthPrefix(value) {
+  const bytes = Buffer.from(value, "utf8");
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(bytes.length);
+  return Buffer.concat([length, bytes]);
+}
+
+const chunks = [];
+process.stdin.on("data", (chunk) => chunks.push(chunk));
+process.stdin.on("end", () => {
+  try {
+    const wrapped = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const envelope = JSON.parse(Buffer.from(wrapped.envelope, "base64").toString("utf8"));
+    const storage = process._linkedBinding("electron_browser_workbuddy_storage");
+    const secret = JSON.parse(storage.loggerGet()).atRestSecretKey;
+    if (typeof secret !== "string" || !secret) throw new Error("missing at-rest secret");
+
+    const key = crypto.createHash("sha256").update(secret, "utf8").digest();
+    const suite = Buffer.alloc(4);
+    suite.writeUInt32BE(envelope.suite);
+    const aad = Buffer.concat([
+      Buffer.from("WB-AAD\0", "utf8"), Buffer.from([1]),
+      lengthPrefix("WBEV1"), lengthPrefix("sym-v1"), suite,
+      lengthPrefix(envelope.keyId), Buffer.from([2, 0, 0]),
+    ]);
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm", key, Buffer.from(envelope.nonce, "base64")
+    );
+    decipher.setAAD(aad);
+    decipher.setAuthTag(Buffer.from(envelope.authTag, "base64"));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(envelope.ciphertext, "base64")), decipher.final(),
+    ]).toString("utf8");
+    process.stdout.write(plaintext);
+  } catch (error) {
+    process.stderr.write(error && error.message ? error.message : "decrypt failed");
+    process.exitCode = 1;
+  }
+});
+"""
 
 
 def mask_token(t):
@@ -41,6 +90,58 @@ def mask_token(t):
     if not t or len(t) < 20:
         return "(无)"
     return "已加载（内容已隐藏）"
+
+
+def find_workbuddy_executable():
+    """查找用于解封新版登录态的本机 WorkBuddy 客户端。"""
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    candidates = [
+        os.environ.get(WORKBUDDY_APP_ENV, ""),
+        r"D:\WorkBuddy\WorkBuddy.exe",
+        os.path.join(local_app_data, "Programs", "WorkBuddy", "WorkBuddy.exe"),
+        os.path.join(local_app_data, "WorkBuddy", "WorkBuddy.exe"),
+        os.path.join(os.environ.get("ProgramFiles", ""), "WorkBuddy", "WorkBuddy.exe"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def decrypt_workbuddy_value(value):
+    """在 WorkBuddy 自身运行时中解开新版的加密字段。"""
+    if isinstance(value, str):
+        return value, None
+    if not isinstance(value, dict) or value.get("$wbEncrypted") != 1:
+        return None, "accessToken 格式无法识别"
+    if not isinstance(value.get("envelope"), str):
+        return None, "加密 accessToken 缺少 envelope"
+
+    executable = find_workbuddy_executable()
+    if not executable:
+        return None, (
+            "检测到新版加密登录态，但找不到 WorkBuddy.exe。"
+            "请设置 %s 指向 WorkBuddy.exe" % WORKBUDDY_APP_ENV
+        )
+
+    environment = os.environ.copy()
+    environment["ELECTRON_RUN_AS_NODE"] = "1"
+    try:
+        result = subprocess.run(
+            [executable, "-e", WORKBUDDY_DECRYPT_HELPER],
+            input=json.dumps(value, separators=(",", ":")),
+            text=True,
+            capture_output=True,
+            timeout=20,
+            env=environment,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None, "WorkBuddy 客户端无法启动或解封超时"
+
+    if result.returncode != 0 or not result.stdout:
+        return None, "WorkBuddy 客户端无法解开加密登录态"
+    return result.stdout, None
 
 
 def find_windows_accounts(users_dir=None):
@@ -94,18 +195,23 @@ def load_auth(auth_file):
             data = json.load(f)
     except Exception as e:
         return None, "登录态文件解析失败：%s" % e
-    tok = data.get("auth", {}).get("accessToken")
+    tok, token_error = decrypt_workbuddy_value(
+        data.get("auth", {}).get("accessToken")
+    )
     uid = data.get("account", {}).get("uid")
     if not tok:
-        return None, "登录态文件里没有 accessToken"
-    if not uid:
+        return None, token_error or "登录态文件里没有 accessToken"
+    if not isinstance(uid, str) or not uid:
         return None, "登录态文件里没有 uid"
     # 留出 5 分钟余量判断是否过期
     expires = data.get("auth", {}).get("expiresAt", 0)
-    if expires and expires < (time.time() * 1000 + 5 * 60 * 1000):
+    if isinstance(expires, (int, float)) and expires < (time.time() * 1000 + 5 * 60 * 1000):
         return None, "accessToken 快过期或已过期，请先打开一次 WorkBuddy 刷新登录态"
-    return {"token": tok, "uid": uid,
-            "nickname": data.get("account", {}).get("nickname", "")}, None
+    nickname = data.get("account", {}).get("nickname", "")
+    # 昵称不影响接口鉴权；新版若将其加密，回退显示 uid，避免解封无关个人信息。
+    if not isinstance(nickname, str):
+        nickname = ""
+    return {"token": tok, "uid": uid, "nickname": nickname}, None
 
 
 def api_post(url, token, uid, payload=None, extra_headers=None):
