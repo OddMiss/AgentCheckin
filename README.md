@@ -46,6 +46,17 @@ Trae CN 会扫描各 Windows 配置文件 `AppData\\Roaming` 或 `AppData\\Local
 
 Qoder 的本地密钥由 Windows DPAPI 按当前 Windows 用户保护。脚本不会尝试绕过这一保护，因此其他 Windows 用户的 Qoder 登录态不会列入菜单；请在对应用户会话中运行脚本。
 
+### 在一个 Windows 账号中管理多个 Qoder CN 登录
+
+若希望在 `HH` 的 Windows 会话中集中签到多个 Qoder CN 账号，不能直接复制或读取其他 Windows 用户的 Qoder 登录文件。正确做法是为每个 Qoder 账号创建一个由 `HH` 管理的独立客户端配置目录：
+
+1. 完全退出所有 Qoder CN 窗口。
+2. 双击 `open_qoder_profile.bat`，输入配置名，例如 `Villa`。
+3. 在新开的 Qoder CN 窗口中手动登录 Villa 的 Qoder 账号。
+4. 对其他账号重复上述操作；每个账号只需登录一次。
+
+启动器会使用 Qoder CN 的标准 `--user-data-dir` 参数，在 `%APPDATA%\AgentCheckin\QoderProfiles\<配置名>` 创建独立配置。脚本会自动发现其中的登录态，并在菜单中标注 `Qoder 配置：Villa`。这些配置仍由 HH 的 Windows DPAPI 加密，账号令牌不会写入本项目。
+
 ## 新版 WorkBuddy 兼容性
 
 新版 WorkBuddy 可能会加密本机登录态。脚本会自动识别该格式，并仅在内存中调用已安装的 WorkBuddy 客户端读取所需的登录令牌；令牌和解封密钥不会写入文件或显示在控制台。

@@ -68,6 +68,7 @@ QODER_API_BASES = ("https://openapi.qoder.com.cn", "https://openapi.qoder.sh")
 QODER_CAMPAIGNS_PATH = "/sash/api/v1/me/campaigns"
 QODER_REFRESH_PATH = "/api/v1/deviceToken/refresh"
 QODER_EXPIRY_MARGIN = 300.0
+QODER_PROFILE_ROOT_ENV = "QODER_PROFILE_ROOT"
 
 # Trae 客户端加密格式中使用的固定参数。它们不是账号密钥；实际会话令牌仍只
 # 在进程内短暂使用，永不输出或写入文件。
@@ -428,23 +429,40 @@ def dpapi_unprotect(data):
 
 
 def find_qoder_accounts():
-    """仅发现当前 Windows 用户的 Qoder 登录态，避免跨用户 DPAPI 解密。"""
+    """发现当前 Windows 用户的 Qoder 登录态与独立 Qoder 配置目录。"""
     override = os.environ.get("QODER_AUTH_FILE")
+    profile_root = None
     if override:
-        candidates = [os.path.dirname(override)]
+        candidates = [os.path.dirname(path.strip()) for path in override.split(";")
+                      if path.strip()]
     else:
         home = os.path.expanduser("~")
         local = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
         roaming = os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
         candidates = [os.path.join(root, name) for root in (roaming, local)
                       for name in QODER_PRODUCT_DIRS]
-    found = []
+        profile_root = os.environ.get(QODER_PROFILE_ROOT_ENV) or os.path.join(
+            roaming, "AgentCheckin", "QoderProfiles")
+        try:
+            candidates.extend(entry.path for entry in os.scandir(profile_root) if entry.is_dir())
+        except OSError:
+            pass
+
+    found, seen = [], set()
     for path in candidates:
+        normalized = os.path.normcase(os.path.abspath(path))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
         if (os.path.isfile(os.path.join(path, QODER_AUTH_BASENAME)) and
                 os.path.isfile(os.path.join(path, QODER_LOCAL_STATE_BASENAME))):
+            profile_name = ""
+            if (profile_root and os.path.dirname(normalized) ==
+                    os.path.normcase(os.path.abspath(profile_root))):
+                profile_name = os.path.basename(path)
             found.append({"platform": "Qoder CN", "windows_user": CURRENT_WINDOWS_USER,
-                          "qoder_dir": path})
-    return found[:1]
+                          "qoder_dir": path, "qoder_profile": profile_name})
+    return found
 
 
 def parse_qoder_time(value):
@@ -872,8 +890,11 @@ def choose_targets(targets):
 
     print("\n可签到项目：")
     for index, target in enumerate(targets, start=1):
+        suffix = ("（Qoder 配置：%s）" % target["qoder_profile"]
+                  if target.get("qoder_profile") else "")
         print("  %d. [%s] Windows 账号：%s" % (
-            index, target.get("platform", "未知平台"), target.get("windows_user") or "未填写"))
+            index, target.get("platform", "未知平台"),
+            (target.get("windows_user") or "未填写") + suffix))
     print("  A. 全部账号")
 
     while True:
