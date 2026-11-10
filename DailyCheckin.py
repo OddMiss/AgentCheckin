@@ -827,14 +827,17 @@ def choose_targets(targets):
 
     while True:
         try:
-            choice = input("\n请选择（如 1、1,3 或 A；直接回车取消）：").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n已取消。")
+            choice = input("\n请选择（如 1、1,3 或 A；直接回车全部，Ctrl+C 退出）：").strip()
+        except KeyboardInterrupt:
+            print("\n已退出。")
+            raise SystemExit(130)
+        except EOFError:
+            print("\n输入已结束，已退出。")
             return None
 
         if not choice:
-            print("已取消。")
-            return None
+            print("已选择全部账号。")
+            return targets
         if choice.lower() in ("a", "all", "0"):
             return targets
 

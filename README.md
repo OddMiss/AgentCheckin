@@ -41,7 +41,7 @@ C:\Users\<Windows 用户名>\AppData\Local\CodeBuddyExtension\Data\Public\auth\w
 
 Trae CN 会扫描各 Windows 配置文件 `AppData\\Roaming` 或 `AppData\\Local` 下的 `TRAE SOLO CN` / `TRAE CN` 登录文件。Qoder CN 会扫描当前 Windows 用户数据目录中的 `auth.v1.dat` 与 `Local State`。
 
-输入编号可选择单个项目；如输入 `1,3` 可选择多个项目；输入 `A`、`all` 或 `0` 可签到全部已发现项目。
+输入编号可选择单个项目；如输入 `1,3` 可选择多个项目；直接回车、输入 `A`、`all` 或 `0` 都会签到全部已发现项目。使用 `Ctrl+C` 退出。
 
 Qoder 的本地密钥由 Windows DPAPI 按当前 Windows 用户保护。脚本不会尝试绕过这一保护，因此其他 Windows 用户的 Qoder 登录态不会列入菜单；请在对应用户会话中运行脚本。
 
@@ -83,6 +83,8 @@ WorkBuddy 登录态包含访问令牌，应视为密码处理。`.gitignore` 已
 本项目会向你选择的平台发送签到或领取请求；`--status` 模式则只查询状态。WorkBuddy 的积分查询为只读操作，不会消耗积分。
 
 Trae CN 与 Qoder CN 的本地登录态和签到逻辑参考本机项目 `D:\AI_Data\workbuddy-trae-auto-signin`，并已按本项目的多账号交互流程重新整合。这是非官方个人工具；客户端存储格式和接口可能随版本变动，请自行遵守各平台服务条款并在异常时停止使用。
+
+Qoder CN 的活动接口仅提供活动及其可领取福利，不提供账号总积分或套餐余额。因此脚本会准确报告活动领取结果，但不会把“可领取活动积分”误显示为“当前剩余积分”。
 
 ## 参考来源
 
