@@ -291,8 +291,10 @@ def load_trae_session(storage_path):
     device_id = next((key[len(TRAE_DC_KEY_PREFIX):] for key in storage
                       if isinstance(key, str) and key.startswith(TRAE_DC_KEY_PREFIX)
                       and key[len(TRAE_DC_KEY_PREFIX):]), None)
+    user_name = auth.get("account") or auth.get("userId")
     return {"token": token, "device_id": device_id,
-            "machine_id": storage.get("telemetry.machineId")}
+            "machine_id": storage.get("telemetry.machineId"),
+            "user_name": str(user_name) if user_name not in (None, "") else ""}
 
 
 def trae_headers(session):
@@ -336,7 +338,8 @@ def checkin_trae(account, status_only=False):
     except Exception as error:
         print("❌ Trae CN 登录态不可用：%s" % error)
         return 3, "登录态不可用"
-    print("Trae CN 登录态：已加载（内容已隐藏）")
+    print("Trae CN 用户：%s  token：已加载（内容已隐藏）" %
+          (session.get("user_name") or "(未提供用户名称)"))
     state = trae_status(session)
     if not state.get("ok"):
         print("❌ 查询 Trae CN 签到状态失败：HTTP %s" % state.get("http", -1))
@@ -440,8 +443,12 @@ def load_qoder_session(qoder_dir):
         raise ValueError("Qoder 登录态无法解密：%s" % error)
     if not isinstance(auth.get("token"), str) or not auth["token"]:
         raise ValueError("Qoder 登录态缺少令牌")
+    user = auth.get("user") if isinstance(auth.get("user"), dict) else {}
+    user_name = (user.get("nickname") or user.get("name") or user.get("displayName") or
+                 user.get("email") or user.get("id"))
     return {"token": auth["token"], "refresh_token": auth.get("refreshToken"),
-            "expires_at": parse_qoder_time(auth.get("expiresAt"))}
+            "expires_at": parse_qoder_time(auth.get("expiresAt")),
+            "user_name": user_name if isinstance(user_name, str) else ""}
 
 
 def qoder_headers(token):
@@ -483,7 +490,8 @@ def checkin_qoder(account, status_only=False):
     except Exception as error:
         print("❌ Qoder CN 登录态不可用：%s" % error)
         return 3, "登录态不可用"
-    print("Qoder CN 登录态：已加载（内容已隐藏）")
+    print("Qoder CN 用户：%s  token：已加载（内容已隐藏）" %
+          (session.get("user_name") or "(未提供用户名称)"))
     state = qoder_campaigns(session)
     if not state.get("ok"):
         print("❌ 查询 Qoder CN 活动失败：HTTP %s" % state.get("http", -1))
