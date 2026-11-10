@@ -58,7 +58,9 @@ TRAE_STORAGE_PARTS = ("User", "globalStorage", "storage.json")
 TRAE_STATUS_URL = "https://api.trae.cn/trae/api/v2/ug/checkin_credits/status"
 TRAE_CLAIM_URL = "https://api.trae.cn/trae/api/v2/ug/checkin_credits/claim"
 
-QODER_PRODUCT_DIRS = ("com.qoder.app.stable", "Qoder", "qoder")
+# Qoder 国际版与国区版使用不同的数据目录名；新版国区客户端使用
+# com.qodercn.app.stable，需与旧版目录一起探测。
+QODER_PRODUCT_DIRS = ("com.qodercn.app.stable", "com.qoder.app.stable", "Qoder", "qoder")
 QODER_AUTH_BASENAME = "auth.v1.dat"
 QODER_LOCAL_STATE_BASENAME = "Local State"
 QODER_API_BASES = ("https://openapi.qoder.com.cn", "https://openapi.qoder.sh")
