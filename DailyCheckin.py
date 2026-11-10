@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -291,10 +292,33 @@ def load_trae_session(storage_path):
     device_id = next((key[len(TRAE_DC_KEY_PREFIX):] for key in storage
                       if isinstance(key, str) and key.startswith(TRAE_DC_KEY_PREFIX)
                       and key[len(TRAE_DC_KEY_PREFIX):]), None)
-    user_name = auth.get("account") or auth.get("userId")
+    user_name, masked_mobile = trae_user_identity(auth)
     return {"token": token, "device_id": device_id,
             "machine_id": storage.get("telemetry.machineId"),
-            "user_name": str(user_name) if user_name not in (None, "") else ""}
+            "user_name": user_name, "masked_mobile": masked_mobile}
+
+
+def trae_user_identity(auth):
+    """只提取可显示的 Trae 用户名和客户端已脱敏手机号。"""
+    account = auth.get("account") if isinstance(auth, dict) else None
+    masked_mobile = ""
+    if isinstance(account, dict):
+        # 只接受客户端已经脱敏的值（如 130******25）；绝不输出完整手机号。
+        mobile = account.get("nonPlainTextMobile")
+        if isinstance(mobile, str) and re.fullmatch(r"\d{3}\*{2,}\d{2,4}", mobile):
+            masked_mobile = mobile
+        for key in ("username", "nickname", "name", "displayName", "userName"):
+            value = account.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip(), masked_mobile
+    elif isinstance(account, (str, int)) and not isinstance(account, bool):
+        value = str(account).strip()
+        if value:
+            return value, masked_mobile
+    user_id = auth.get("userId") if isinstance(auth, dict) else None
+    if isinstance(user_id, (str, int)) and not isinstance(user_id, bool):
+        return str(user_id).strip(), masked_mobile
+    return "", masked_mobile
 
 
 def trae_headers(session):
@@ -317,11 +341,12 @@ def trae_headers(session):
 
 def trae_status(session):
     code, body = request_json(TRAE_STATUS_URL, trae_headers(session), payload={"req_source": 1})
-    if code == 200 and isinstance(body, dict):
+    if code == 200 and isinstance(body, dict) and body.get("code", 0) == 0:
         return {"ok": True, "checked_in": bool(body.get("checked_in")),
                 "enabled": bool(body.get("enable", True)),
                 "credits": int(body.get("credits") or 0)}
-    return {"ok": False, "http": code, "body": body}
+    return {"ok": False, "http": code, "api_code": body.get("code") if isinstance(body, dict) else None,
+            "message": api_message(body), "body": body}
 
 
 def trae_claim(session):
@@ -329,7 +354,19 @@ def trae_claim(session):
     if code == 200 and isinstance(body, dict) and body.get("code") == 0:
         data = body.get("data") if isinstance(body.get("data"), dict) else {}
         return {"ok": True, "credits": int(data.get("credits") or body.get("credits") or 0)}
-    return {"ok": False, "http": code, "body": body}
+    return {"ok": False, "http": code, "api_code": body.get("code") if isinstance(body, dict) else None,
+            "message": api_message(body), "body": body}
+
+
+def api_message(body):
+    """仅展示服务端的简短业务说明，不输出原始响应或敏感字段。"""
+    if not isinstance(body, dict):
+        return ""
+    for key in ("message", "msg", "error_message", "error"):
+        value = body.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:200]
+    return ""
 
 
 def checkin_trae(account, status_only=False):
@@ -338,11 +375,15 @@ def checkin_trae(account, status_only=False):
     except Exception as error:
         print("❌ Trae CN 登录态不可用：%s" % error)
         return 3, "登录态不可用"
-    print("Trae CN 用户：%s  token：已加载（内容已隐藏）" %
-          (session.get("user_name") or "(未提供用户名称)"))
+    identity = "Trae CN 用户：%s" % (session.get("user_name") or "(未提供用户名称)")
+    if session.get("masked_mobile"):
+        identity += "  手机号：%s" % session["masked_mobile"]
+    print(identity + "  token：已加载（内容已隐藏）")
     state = trae_status(session)
     if not state.get("ok"):
-        print("❌ 查询 Trae CN 签到状态失败：HTTP %s" % state.get("http", -1))
+        detail = state.get("message") or "未返回业务说明"
+        print("❌ 查询 Trae CN 签到状态失败：HTTP %s / code=%s / %s" %
+              (state.get("http", -1), state.get("api_code"), detail))
         return 4, "查询状态失败"
     if state["checked_in"]:
         print("✅ Trae CN 今天已经签到过了，当前积分：%s" % state["credits"])
@@ -358,7 +399,9 @@ def checkin_trae(account, status_only=False):
         credits = result.get("credits") or state["credits"]
         print("✅ Trae CN 签到成功，当前积分：%s" % credits)
         return 0, "签到成功"
-    print("❌ Trae CN 签到失败：HTTP %s" % result.get("http", -1))
+    detail = result.get("message") or "未返回业务说明"
+    print("❌ Trae CN 签到失败：HTTP %s / code=%s / %s" %
+          (result.get("http", -1), result.get("api_code"), detail))
     return 5, "签到失败"
 
 
