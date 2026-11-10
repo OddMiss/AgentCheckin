@@ -50,10 +50,12 @@ Qoder 的本地密钥由 Windows DPAPI 按当前 Windows 用户保护。脚本�
 
 若希望在 `HH` 的 Windows 会话中集中签到多个 Qoder CN 账号，不能直接复制或读取其他 Windows 用户的 Qoder 登录文件。正确做法是为每个 Qoder 账号创建一个由 `HH` 管理的独立客户端配置目录：
 
-1. 完全退出所有 Qoder CN 窗口。
+1. 完全退出所有 Qoder CN 窗口，包含系统托盘/后台进程。
 2. 双击 `open_qoder_profile.bat`，输入配置名，例如 `Villa`。
-3. 在新开的 Qoder CN 窗口中手动登录 Villa 的 Qoder 账号。
-4. 对其他账号重复上述操作；每个账号只需登录一次。
+3. **先不要登录。** 启动器会等待并验证新目录内是否生成 `Local State`。
+4. 只有窗口显示“`Isolated profile verified`”后，才在新开的 Qoder CN 中手动登录 Villa 的账号。
+5. 若提示 profile directory was not activated，立即关闭 Qoder，**不要登录**；否则登录会落入默认目录并替换 HH 的当前会话。
+6. 对其他账号重复上述操作；每个账号只需登录一次。
 
 启动器会使用 Qoder CN 的标准 `--user-data-dir` 参数，在 `%APPDATA%\AgentCheckin\QoderProfiles\<配置名>` 创建独立配置。脚本会自动发现其中的登录态，并在菜单中标注 `Qoder 配置：Villa`。这些配置仍由 HH 的 Windows DPAPI 加密，账号令牌不会写入本项目。
 
