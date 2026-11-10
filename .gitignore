@@ -5,6 +5,9 @@ __pycache__/
 
 # WorkBuddy login state and other credentials
 workbuddy-desktop.info
+auth.v1.dat
+Local State
+storage.json
 *.info
 *.token
 *.pem

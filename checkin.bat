@@ -14,7 +14,7 @@ if errorlevel 1 (
     pause
     exit /b 9009
 )
-python "%~dp0WorkBuddyDailyCheckin.py"
+python "%~dp0DailyCheckin.py" %*
 
 set "CHECKIN_EXIT_CODE=%ERRORLEVEL%"
 echo.

@@ -1,0 +1,2 @@
+# Trae CN 和 Qoder CN 本机登录态解密
+cryptography>=42
