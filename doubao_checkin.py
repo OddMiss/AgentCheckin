@@ -49,6 +49,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -287,6 +288,25 @@ def page_text(page) -> str:
         return page.inner_text("body")[:4000]
     except Exception:
         return ""
+
+
+def page_identity(page) -> dict:
+    """从已登录页面可见文本中提取账号标识和手机号，绝不返回完整手机号。"""
+    text = page_text(page)
+    identity = {}
+    user_name = re.search(r"(?<!\w)(用户\d{4,})(?!\d)", text)
+    if user_name:
+        identity["user_name"] = user_name.group(1)
+    # 优先使用平台已脱敏号码；即使页面意外显示完整号码，也只保留脱敏版本。
+    masked = re.search(r"(?<!\d)(1\d{2}\*{2,6}\d{2,4})(?!\d)", text)
+    if masked:
+        identity["masked_mobile"] = masked.group(1)
+    else:
+        full = re.search(r"(?<!\d)(1[3-9]\d{9})(?!\d)", text)
+        if full:
+            mobile = full.group(1)
+            identity["masked_mobile"] = mobile[:3] + "*" * 6 + mobile[-2:]
+    return identity
 
 
 def find_and_click(page) -> bool:
@@ -919,6 +939,7 @@ def checkin(start_url: str, action: str) -> int:
             # 客户端专属活动检测: 页面出现拦截文案说明当前通道未通过客户端校验
             # (正常只会在网页登录态模式发生; 客户端凭据模式带 SamanthaDoubao UA 不应触发)
             body = page_text(page)
+            identity = page_identity(page)
             if "仅支持在豆包电脑版" in body:
                 shot = SHOT_DIR / f"client-only-{datetime.datetime.now():%Y%m%d-%H%M%S}.png"
                 SHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -953,9 +974,11 @@ def checkin(start_url: str, action: str) -> int:
                 SHOT_DIR.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(shot), full_page=False)
                 log(f"幂等前置命中: 今日已签过, 跳过点击 (截图: {shot})")
-                emit({"result": "already", "report": REPORTS["already"],
-                      "mode": "client" if use_client else "profile",
-                      "needs_attention": False, "screenshot": str(shot)}, action)
+                out = {"result": "already", "report": REPORTS["already"],
+                       "mode": "client" if use_client else "profile",
+                       "needs_attention": False, "screenshot": str(shot)}
+                out.update(identity)
+                emit(out, action)
                 notify("豆包签到", "今天已经签过啦")
                 return 0
 
@@ -988,6 +1011,7 @@ def checkin(start_url: str, action: str) -> int:
             out = {"result": result, "report": REPORTS[result],
                    "mode": "client" if use_client else "profile",
                    "needs_attention": result in NEEDS_ATTENTION_CODES, "screenshot": str(shot)}
+            out.update(identity)
             # 轮询模式的空跑(已签过)不写日志, 防止有价值的记录被淹没; 其余结果正常输出
             if action == "silent-poll" and result == "already":
                 log("轮询空跑: 今日已签过, 不落盘")

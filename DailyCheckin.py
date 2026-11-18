@@ -677,6 +677,23 @@ def _doubao_result_from_output(output):
     return None
 
 
+def doubao_identity_from_trae(windows_user, user_name):
+    """仅在豆包与 Trae 显示的账号标识完全一致时复用已脱敏手机号。"""
+    if not isinstance(user_name, str) or not user_name:
+        return ""
+    for account in find_trae_accounts():
+        if account.get("windows_user") != windows_user:
+            continue
+        try:
+            session = load_trae_session(account["auth_file"])
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if (session.get("user_name") == user_name and
+                re.fullmatch(r"\d{3}\*{2,}\d{2,4}", session.get("masked_mobile", ""))):
+            return session["masked_mobile"]
+    return ""
+
+
 def checkin_doubao(account, status_only=False):
     """调用独立的豆包工作模块，并只显示无凭据的最终状态。"""
     print("Windows 账号：%s" % (account.get("windows_user") or "未填写"))
@@ -688,7 +705,7 @@ def checkin_doubao(account, status_only=False):
         return 3, "签到模块缺失"
     try:
         completed = subprocess.run(
-            [sys.executable, DOUBAO_SCRIPT, "run"],
+            [sys.executable, "-X", "utf8", DOUBAO_SCRIPT, "run"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=720,
         )
@@ -705,6 +722,20 @@ def checkin_doubao(account, status_only=False):
         report = result.get("report")
         if not isinstance(report, str) or not report.strip():
             report = "未提供结果说明"
+        user_name = result.get("user_name")
+        if not isinstance(user_name, str) or not user_name.strip():
+            user_name = "(未提供用户名称)"
+        else:
+            user_name = user_name.strip()
+        masked_mobile = result.get("masked_mobile")
+        if not isinstance(masked_mobile, str) or not re.fullmatch(r"\d{3}\*{2,}\d{2,4}", masked_mobile):
+            masked_mobile = doubao_identity_from_trae(account.get("windows_user"), user_name)
+        identity = "豆包工作用户：%s" % user_name
+        if masked_mobile:
+            identity += "  手机号：%s" % masked_mobile
+        else:
+            identity += "  手机号：(未提供)"
+        print(identity)
         # 上游结果可能带本机截图路径和诊断细节；统一入口仅显示安全的报告文字。
         if state in ("success", "already"):
             print("✅ 豆包工作：%s" % report.strip())
