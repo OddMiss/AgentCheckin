@@ -723,6 +723,38 @@ def minimax_user_identity(profile_path):
     return ""
 
 
+def minimax_masked_mobile(profile_path):
+    """从 MiniMax 自己的账号资料中读取手机号，并始终返回脱敏形式。
+
+    不能从其他客户端的账号资料补全手机号：同一 Windows 用户在不同平台可能
+    登录不同账号。当前 MiniMax 版本通常并不保存手机号；保留兼容读取是为了在
+    客户端明确提供该字段时安全显示它。
+    """
+    path = os.path.join(profile_path, *MINIMAX_CONFIG_PARTS)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+    # 仅接受明确的手机号字段，不扫描日志、令牌或任意文本。
+    for user in (payload.get("sharedUser"), payload.get("user")):
+        if not isinstance(user, dict):
+            continue
+        for key in ("nonPlainTextMobile", "maskedMobile", "maskedPhone",
+                    "mobile", "phone", "phoneNumber"):
+            value = user.get(key)
+            if not isinstance(value, (str, int)) or isinstance(value, bool):
+                continue
+            value = str(value).strip()
+            if re.fullmatch(r"\d{3}\*{2,}\d{2,4}", value):
+                return value
+            # 即使新版客户端意外保存完整号码，控制台也绝不输出完整号码。
+            if re.fullmatch(r"1[3-9]\d{9}", value):
+                return "%s******%s" % (value[:3], value[-2:])
+    return ""
+
+
 def _has_qoder_client_data(profile_path):
     """只判断其他 Windows 配置文件是否存在 Qoder 数据，不读取登录态。"""
     for base in ("Roaming", "Local"):
@@ -965,7 +997,9 @@ def checkin_minimax(account, status_only=False):
     print("Windows 账号：%s" % (account.get("windows_user") or "未填写"))
     profile_path = account.get("profile_path") or os.path.expanduser("~")
     user_name = minimax_user_identity(profile_path)
+    masked_mobile = minimax_masked_mobile(profile_path)
     identity = "MiniMax Code 用户：%s" % (user_name or "(未提供用户名称)")
+    identity += "  手机号：%s" % (masked_mobile or "(未提供)")
     if status_only:
         print(identity)
         print("ℹ️  已发现 MiniMax Code 登录态（仅查询模式不刷新登录态，也不会签到）。")
