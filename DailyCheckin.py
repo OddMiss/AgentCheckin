@@ -709,13 +709,17 @@ def minimax_user_identity(profile_path):
     path = os.path.join(profile_path, *MINIMAX_CONFIG_PARTS)
     try:
         with open(path, encoding="utf-8") as handle:
-            user = (json.load(handle).get("user") or {})
+            payload = json.load(handle)
     except (OSError, ValueError, AttributeError):
         return ""
-    for key in ("userName", "realUserID"):
-        value = user.get(key)
-        if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).strip():
-            return str(value).strip()
+    # 新版客户端将账号资料放到 sharedUser；旧版可能仍使用 user。
+    for user in (payload.get("sharedUser"), payload.get("user")):
+        if not isinstance(user, dict):
+            continue
+        for key in ("userName", "subUserName", "realUserID", "userID"):
+            value = user.get(key)
+            if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).strip():
+                return str(value).strip()
     return ""
 
 
