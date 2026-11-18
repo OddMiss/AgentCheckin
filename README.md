@@ -47,6 +47,12 @@ Trae CN 会扫描各 Windows 配置文件 `AppData\\Roaming` 或 `AppData\\Local
 
 Qoder 的本地密钥由 Windows DPAPI 按当前 Windows 用户保护。脚本不会尝试绕过这一保护，因此其他 Windows 用户的 Qoder 登录态不会列入菜单；请在对应用户会话中运行脚本。
 
+### 在主账号中运行其他 Windows 用户的 Qoder CN / 豆包工作
+
+主账号的签到完成后，脚本会列出其他 Windows 用户中检测到 Qoder CN 或豆包工作客户端数据的账号。选择账号后，Windows 会在控制台提示输入该 Windows 用户的登录密码，并为其打开独立的签到窗口。该窗口只处理 Qoder CN 和豆包工作，因此不会覆盖主账号的客户端登录态，也不会重复执行 WorkBuddy 或 Trae CN。
+
+密码由 Windows `runas` 直接接收：不会传给 Python、不会写入命令行、文件、日志或 Git。请使用该 Windows 用户的**登录密码**，而非 Windows Hello PIN；若该用户是 Microsoft 账号，Windows 会以系统识别到的登录名提示认证。
+
 ### 在一个 Windows 账号中管理多个 Qoder CN 登录
 
 若希望在 `HH` 的 Windows 会话中集中签到多个 Qoder CN 账号，不能直接复制或读取其他 Windows 用户的 Qoder 登录文件。正确做法是为每个 Qoder 账号创建一个由 `HH` 管理的独立客户端配置目录：

@@ -70,6 +70,7 @@ QODER_REFRESH_PATH = "/api/v1/deviceToken/refresh"
 QODER_EXPIRY_MARGIN = 300.0
 QODER_PROFILE_ROOT_ENV = "QODER_PROFILE_ROOT"
 DOUBAO_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "doubao_checkin.py")
+BOUND_CHECKIN_BATCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_bound_checkin.bat")
 
 # Trae 客户端加密格式中使用的固定参数。它们不是账号密钥；实际会话令牌仍只
 # 在进程内短暂使用，永不输出或写入文件。
@@ -665,6 +666,150 @@ def find_doubao_accounts():
     return []
 
 
+def _has_qoder_client_data(profile_path):
+    """只判断其他 Windows 配置文件是否存在 Qoder 数据，不读取登录态。"""
+    for base in ("Roaming", "Local"):
+        root = os.path.join(profile_path, "AppData", base)
+        for product in QODER_PRODUCT_DIRS:
+            candidate = os.path.join(root, product)
+            if (os.path.isfile(os.path.join(candidate, QODER_AUTH_BASENAME)) and
+                    os.path.isfile(os.path.join(candidate, QODER_LOCAL_STATE_BASENAME))):
+                return True
+    return False
+
+
+def _has_doubao_client_data(profile_path):
+    """只判断其他 Windows 配置文件是否存在豆包客户端数据，不读取登录态。"""
+    local_app_data = os.path.join(profile_path, "AppData", "Local")
+    try:
+        entries = os.scandir(local_app_data)
+        for entry in entries:
+            if not entry.is_dir() or "doubao" not in entry.name.lower():
+                continue
+            if (os.path.isfile(os.path.join(entry.path, "Local State")) or
+                    os.path.isfile(os.path.join(entry.path, "User Data", "Local State"))):
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def find_other_windows_bound_accounts(users_dir=None):
+    """发现其他 Windows 用户的 Qoder/豆包数据，但绝不在当前用户下解密。"""
+    if users_dir is None:
+        users_dir = os.path.dirname(os.path.expanduser("~"))
+    current_profile = os.path.normcase(os.path.abspath(os.path.expanduser("~")))
+    found = []
+    try:
+        profiles = os.scandir(users_dir)
+    except OSError:
+        return found
+    with profiles:
+        for profile in profiles:
+            if not profile.is_dir():
+                continue
+            profile_path = os.path.normcase(os.path.abspath(profile.path))
+            if profile_path == current_profile:
+                continue
+            platforms = []
+            if _has_qoder_client_data(profile.path):
+                platforms.append("Qoder CN")
+            if _has_doubao_client_data(profile.path):
+                platforms.append("豆包工作")
+            if platforms:
+                found.append({"windows_user": profile.name, "profile_path": profile.path,
+                              "platforms": tuple(platforms)})
+    return sorted(found, key=lambda item: item["windows_user"].lower())
+
+
+def resolve_windows_logon_name(profile_path, fallback_user):
+    """将 C:\\Users 配置目录映射为 Windows 认证用户名；失败时仅回退本地用户名。"""
+    if os.name != "nt":
+        return ".\\%s" % fallback_user
+    command = (
+        "$target=$env:AGENTCHECKIN_PROFILE_PATH;"
+        "$profile=Get-CimInstance Win32_UserProfile | Where-Object "
+        "{ $_.LocalPath -eq $target } | Select-Object -First 1;"
+        "if ($profile) {"
+        "(New-Object System.Security.Principal.SecurityIdentifier($profile.SID))."
+        "Translate([System.Security.Principal.NTAccount]).Value"
+        "}"
+    )
+    environment = os.environ.copy()
+    environment["AGENTCHECKIN_PROFILE_PATH"] = os.path.abspath(profile_path)
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=15, env=environment,
+        )
+        resolved = completed.stdout.strip()
+        if completed.returncode == 0 and resolved and "\n" not in resolved:
+            return resolved
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ".\\%s" % fallback_user
+
+
+def choose_other_windows_bound_accounts(accounts):
+    """选择需要切换 Windows 身份的 Qoder/豆包账号；回车表示跳过。"""
+    if not accounts:
+        return []
+    print("\n其他 Windows 用户的受保护客户端登录态：")
+    for index, account in enumerate(accounts, start=1):
+        print("  %d. Windows 账号：%s（%s）" % (
+            index, account["windows_user"], "、".join(account["platforms"])))
+    print("  A. 全部启动")
+    while True:
+        try:
+            choice = input("请选择要以其他 Windows 身份运行的账号（如 1、1,3 或 A；直接回车跳过）：").strip()
+        except KeyboardInterrupt:
+            print("\n已跳过其他 Windows 用户。")
+            return []
+        except EOFError:
+            return []
+        if not choice:
+            return []
+        if choice.lower() in ("a", "all", "0"):
+            return accounts
+        try:
+            indexes = [int(item.strip()) for item in choice.split(",")]
+            if not indexes or any(index < 1 or index > len(accounts) for index in indexes):
+                raise ValueError
+        except ValueError:
+            print("输入无效，请输入账号编号、逗号分隔的编号，或 A。")
+            continue
+        selected = []
+        for index in indexes:
+            account = accounts[index - 1]
+            if account not in selected:
+                selected.append(account)
+        return selected
+
+
+def launch_bound_checkin_as_windows_user(account):
+    """让 Windows 自行收集密码并以目标用户运行仅限 Qoder/豆包的子任务。"""
+    if not os.path.isfile(BOUND_CHECKIN_BATCH):
+        print("❌ 找不到跨 Windows 用户启动器。")
+        return False
+    logon_name = resolve_windows_logon_name(account["profile_path"], account["windows_user"])
+    # 密码由 runas 直接在 Windows 控制台读取；绝不作为 Python 参数、变量或日志内容。
+    # 显式传入当前可用的 Python，避免目标 Windows 用户的 PATH 未配置 Python。
+    command = 'cmd.exe /d /k ""%s" "%s""' % (BOUND_CHECKIN_BATCH, sys.executable)
+    print("\n🔐 Windows 将提示输入 %s 的登录密码（输入不会显示或保存）。" % logon_name)
+    print("   新窗口只会运行：%s" % "、".join(account["platforms"]))
+    try:
+        completed = subprocess.run(["runas", "/profile", "/user:" + logon_name, command])
+    except OSError as error:
+        print("❌ 无法启动 Windows 身份切换：%s" % error)
+        return False
+    if completed.returncode != 0:
+        print("❌ Windows 未启动该用户的签到窗口（密码错误或取消输入）。")
+        return False
+    print("ℹ️  已交给 Windows 启动 %s 的签到窗口，请在该窗口查看结果。" % account["windows_user"])
+    return True
+
+
 def _doubao_result_from_output(output):
     """提取上游模块的最终 JSON 结果，过程日志绝不回显。"""
     for line in reversed((output or "").splitlines()):
@@ -1084,17 +1229,29 @@ def checkin_workbuddy_status(account):
 
 
 def main():
-    unknown_options = [option for option in sys.argv[1:] if option != "--status"]
+    allowed_options = ("--status", "--bound-only")
+    unknown_options = [option for option in sys.argv[1:] if option not in allowed_options]
     if unknown_options:
-        print("用法：python DailyCheckin.py [--status]")
+        print("用法：python DailyCheckin.py [--status] [--bound-only]")
         return 2
     status_only = "--status" in sys.argv[1:]
+    bound_only = "--bound-only" in sys.argv[1:]
     print("AgentCheckin 每日签到  %s" % time.strftime("%Y-%m-%d %H:%M:%S"))
     if status_only:
         print("仅查询模式：不会发起任何领取请求。")
-    targets = choose_targets(find_checkin_targets())
+    if bound_only:
+        print("跨 Windows 用户模式：仅处理当前 Windows 用户的 Qoder CN 与豆包工作。")
+        targets = find_qoder_accounts() + find_doubao_accounts()
+    else:
+        targets = choose_targets(find_checkin_targets())
     if targets is None:
         return 0
+    if not targets:
+        if bound_only:
+            print("❌ 当前 Windows 用户没有发现已登录的 Qoder CN 或豆包工作。")
+        else:
+            print("❌ 没有发现可签到的项目。")
+        return 1
 
     results = []
     for index, target in enumerate(targets, start=1):
@@ -1109,7 +1266,13 @@ def main():
     for platform, windows_user, code, message in results:
         icon = "✅" if code == 0 else "❌"
         print("%s [%s] Windows 账号 %s：%s" % (icon, platform, windows_user, message))
-    return 0 if all(code == 0 for _, _, code, _ in results) else 1
+    all_succeeded = all(code == 0 for _, _, code, _ in results)
+    if not bound_only and not status_only:
+        other_accounts = choose_other_windows_bound_accounts(find_other_windows_bound_accounts())
+        for account in other_accounts:
+            if not launch_bound_checkin_as_windows_user(account):
+                all_succeeded = False
+    return 0 if all_succeeded else 1
 
 
 if __name__ == "__main__":
