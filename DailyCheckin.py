@@ -642,6 +642,19 @@ def find_checkin_targets():
     return targets
 
 
+def find_menu_targets():
+    """构造主菜单：常规项目加上需切换 Windows 身份的受保护项目。"""
+    targets = find_checkin_targets()
+    for account in find_other_windows_bound_accounts():
+        targets.append({
+            "platform": "、".join(account["platforms"]),
+            "windows_user": account["windows_user"],
+            "requires_windows_password": True,
+            "bound_account": account,
+        })
+    return targets
+
+
 def find_doubao_accounts():
     """发现当前 Windows 用户已安装且存有客户端数据的豆包工作。
 
@@ -1146,8 +1159,12 @@ def choose_targets(targets):
 
     print("\n可签到项目：")
     for index, target in enumerate(targets, start=1):
-        suffix = ("（Qoder 配置：%s）" % target["qoder_profile"]
-                  if target.get("qoder_profile") else "")
+        details = []
+        if target.get("qoder_profile"):
+            details.append("Qoder 配置：%s" % target["qoder_profile"])
+        if target.get("requires_windows_password"):
+            details.append("需 Windows 密码")
+        suffix = "（%s）" % "；".join(details) if details else ""
         print("  %d. [%s] Windows 账号：%s" % (
             index, target.get("platform", "未知平台"),
             (target.get("windows_user") or "未填写") + suffix))
@@ -1239,11 +1256,12 @@ def main():
     print("AgentCheckin 每日签到  %s" % time.strftime("%Y-%m-%d %H:%M:%S"))
     if status_only:
         print("仅查询模式：不会发起任何领取请求。")
+    password_targets = []
     if bound_only:
         print("跨 Windows 用户模式：仅处理当前 Windows 用户的 Qoder CN 与豆包工作。")
         targets = find_qoder_accounts() + find_doubao_accounts()
     else:
-        targets = choose_targets(find_checkin_targets())
+        targets = choose_targets(find_menu_targets())
     if targets is None:
         return 0
     if not targets:
@@ -1253,25 +1271,34 @@ def main():
             print("❌ 没有发现可签到的项目。")
         return 1
 
+    direct_targets = [target for target in targets if not target.get("requires_windows_password")]
+    password_targets = [target for target in targets if target.get("requires_windows_password")]
     results = []
-    for index, target in enumerate(targets, start=1):
+    for index, target in enumerate(direct_targets, start=1):
         windows_user = target.get("windows_user") or "未填写"
         platform = target.get("platform", "未知平台")
         print("\n%s" % ("=" * 18))
-        print("[%d/%d] [%s] Windows 账号：%s" % (index, len(targets), platform, windows_user))
+        print("[%d/%d] [%s] Windows 账号：%s" % (index, len(direct_targets), platform, windows_user))
         code, message = checkin_target(target, status_only=status_only)
         results.append((platform, windows_user, code, message))
+
+    all_succeeded = all(code == 0 for _, _, code, _ in results)
+    for target in password_targets:
+        platform = target.get("platform", "受保护客户端")
+        windows_user = target.get("windows_user") or "未填写"
+        if status_only:
+            results.append((platform, windows_user, 0, "仅查询模式：未切换 Windows 用户"))
+            continue
+        if launch_bound_checkin_as_windows_user(target["bound_account"]):
+            results.append((platform, windows_user, 0, "已启动 Windows 签到窗口"))
+        else:
+            results.append((platform, windows_user, 1, "未启动 Windows 签到窗口"))
+            all_succeeded = False
 
     print("\n签到结果汇总：")
     for platform, windows_user, code, message in results:
         icon = "✅" if code == 0 else "❌"
         print("%s [%s] Windows 账号 %s：%s" % (icon, platform, windows_user, message))
-    all_succeeded = all(code == 0 for _, _, code, _ in results)
-    if not bound_only and not status_only:
-        other_accounts = choose_other_windows_bound_accounts(find_other_windows_bound_accounts())
-        for account in other_accounts:
-            if not launch_bound_checkin_as_windows_user(account):
-                all_succeeded = False
     return 0 if all_succeeded else 1
 
 
