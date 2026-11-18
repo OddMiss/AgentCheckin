@@ -4,6 +4,12 @@ __pycache__/
 *.log
 doubao_data/
 
+# MiniMax Code client credentials and local state
+.minimax/
+local-runtime.auth.json
+auth-state.json
+minimax-agent-cn-config.json
+
 # WorkBuddy login state and other credentials
 workbuddy-desktop.info
 auth.v1.dat

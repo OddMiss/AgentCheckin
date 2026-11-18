@@ -71,7 +71,10 @@ QODER_EXPIRY_MARGIN = 300.0
 QODER_PROFILE_ROOT_ENV = "QODER_PROFILE_ROOT"
 DOUBAO_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "doubao_checkin.py")
 BOUND_CHECKIN_BATCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_bound_checkin.bat")
-BOUND_PLATFORM_KEYS = {"Qoder CN": "qoder", "豆包工作": "doubao"}
+BOUND_PLATFORM_KEYS = {"Qoder CN": "qoder", "豆包工作": "doubao", "MiniMax Code": "minimax"}
+MINIMAX_OAUTH_PARTS = (".minimax", "auth", "prod", "cn", "mcode-public", "auth.json")
+MINIMAX_LEGACY_PARTS = (".minimax", "local-runtime.auth.json")
+MINIMAX_CONFIG_PARTS = ("AppData", "Roaming", "minimax", "minimax-agent-cn-config.json")
 
 # Trae 客户端加密格式中使用的固定参数。它们不是账号密钥；实际会话令牌仍只
 # 在进程内短暂使用，永不输出或写入文件。
@@ -640,6 +643,7 @@ def find_checkin_targets():
     targets.extend(find_trae_accounts())
     targets.extend(find_qoder_accounts())
     targets.extend(find_doubao_accounts())
+    targets.extend(find_minimax_accounts())
     return targets
 
 
@@ -683,6 +687,36 @@ def find_doubao_accounts():
     except OSError:
         pass
     return []
+
+
+def _has_minimax_client_data(profile_path):
+    """判断 MiniMax Code OAuth 或旧会话文件是否存在，不读取其内容。"""
+    return (os.path.isfile(os.path.join(profile_path, *MINIMAX_OAUTH_PARTS)) or
+            os.path.isfile(os.path.join(profile_path, *MINIMAX_LEGACY_PARTS)))
+
+
+def find_minimax_accounts():
+    """发现当前 Windows 用户的 MiniMax Code 客户端登录态。"""
+    profile_path = os.path.expanduser("~")
+    if not _has_minimax_client_data(profile_path):
+        return []
+    return [{"platform": "MiniMax Code", "windows_user": CURRENT_WINDOWS_USER,
+             "profile_path": profile_path}]
+
+
+def minimax_user_identity(profile_path):
+    """只读取 MiniMax 客户端公开配置中的昵称或用户标识，绝不读取 OAuth token。"""
+    path = os.path.join(profile_path, *MINIMAX_CONFIG_PARTS)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            user = (json.load(handle).get("user") or {})
+    except (OSError, ValueError, AttributeError):
+        return ""
+    for key in ("userName", "realUserID"):
+        value = user.get(key)
+        if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).strip():
+            return str(value).strip()
+    return ""
 
 
 def _has_qoder_client_data(profile_path):
@@ -735,6 +769,8 @@ def find_other_windows_bound_accounts(users_dir=None):
                 platforms.append("Qoder CN")
             if _has_doubao_client_data(profile.path):
                 platforms.append("豆包工作")
+            if _has_minimax_client_data(profile.path):
+                platforms.append("MiniMax Code")
             if platforms:
                 found.append({"windows_user": profile.name, "profile_path": profile.path,
                               "platforms": tuple(platforms)})
@@ -814,7 +850,7 @@ def launch_bound_checkin_as_windows_user(account):
     logon_name = resolve_windows_logon_name(account["profile_path"], account["windows_user"])
     platform_keys = tuple(account.get("bound_platforms") or
                           (BOUND_PLATFORM_KEYS[name] for name in account["platforms"]))
-    if not platform_keys or any(key not in ("qoder", "doubao") for key in platform_keys):
+    if not platform_keys or any(key not in ("qoder", "doubao", "minimax") for key in platform_keys):
         print("❌ 跨 Windows 用户的平台配置无效。")
         return False
     # 密码由 runas 直接在 Windows 控制台读取；绝不作为 Python 参数、变量或日志内容。
@@ -918,6 +954,41 @@ def checkin_doubao(account, status_only=False):
         return 5, "签到模块异常"
     print("❌ 豆包工作签到结果无法识别。")
     return 5, "结果无法识别"
+
+
+def checkin_minimax(account, status_only=False):
+    """使用 MiniMax Code 本机 OAuth 登录态执行签到；仅查询模式不刷新或写回凭据。"""
+    print("Windows 账号：%s" % (account.get("windows_user") or "未填写"))
+    profile_path = account.get("profile_path") or os.path.expanduser("~")
+    user_name = minimax_user_identity(profile_path)
+    identity = "MiniMax Code 用户：%s" % (user_name or "(未提供用户名称)")
+    if status_only:
+        print(identity)
+        print("ℹ️  已发现 MiniMax Code 登录态（仅查询模式不刷新登录态，也不会签到）。")
+        return 0, "仅查询：已发现客户端登录态"
+    try:
+        from minimax_checkin import MiniMaxCheckin
+        result = MiniMaxCheckin().run()
+    except Exception as error:  # noqa: BLE001
+        print("❌ MiniMax Code 签到模块异常：%s" % error)
+        return 4, "签到模块异常"
+
+    print(identity)
+    status = result.get("status") if isinstance(result, dict) else "failed"
+    message = result.get("message", "未提供结果说明") if isinstance(result, dict) else "结果格式异常"
+    if status in ("success", "already"):
+        print("✅ MiniMax Code：%s" % message)
+        try:
+            balance = MiniMaxCheckin().balance()
+            remaining = to_decimal(balance.get("remain"))
+            if balance.get("available") and remaining is not None:
+                print("当前剩余积分：%s%s" % (
+                    format_credits(remaining), balance.get("note", "")))
+        except Exception:
+            pass
+        return 0, "签到成功" if status == "success" else "今天已签到"
+    print("❌ MiniMax Code 签到未完成：%s" % message)
+    return 5, "签到未完成"
 
 
 def load_auth(auth_file):
@@ -1228,6 +1299,8 @@ def checkin_target(target, status_only=False):
         return checkin_qoder(target, status_only=status_only)
     if platform == "豆包工作":
         return checkin_doubao(target, status_only=status_only)
+    if platform == "MiniMax Code":
+        return checkin_minimax(target, status_only=status_only)
     print("❌ 不支持的平台：%s" % platform)
     return 3, "平台配置错误"
 
@@ -1264,7 +1337,7 @@ def main():
     unknown_options = [option for option in sys.argv[1:]
                        if option not in allowed_options and not option.startswith("--bound-platforms=")]
     if unknown_options:
-        print("用法：python DailyCheckin.py [--status] [--bound-only] [--bound-platforms=qoder,doubao]")
+        print("用法：python DailyCheckin.py [--status] [--bound-only] [--bound-platforms=qoder,doubao,minimax]")
         return 2
     if len(bound_platform_options) > 1:
         print("❌ --bound-platforms 只能提供一次。")
@@ -1273,8 +1346,8 @@ def main():
     if bound_platform_options:
         bound_platforms = {item.strip().lower() for item in
                            bound_platform_options[0].split("=", 1)[1].split(",") if item.strip()}
-        if not bound_platforms or not bound_platforms <= {"qoder", "doubao"}:
-            print("❌ --bound-platforms 仅支持 qoder,doubao。")
+        if not bound_platforms or not bound_platforms <= {"qoder", "doubao", "minimax"}:
+            print("❌ --bound-platforms 仅支持 qoder,doubao,minimax。")
             return 2
     status_only = "--status" in sys.argv[1:]
     bound_only = "--bound-only" in sys.argv[1:]
@@ -1283,19 +1356,21 @@ def main():
         print("仅查询模式：不会发起任何领取请求。")
     password_targets = []
     if bound_only:
-        print("跨 Windows 用户模式：仅处理当前 Windows 用户的 Qoder CN 与豆包工作。")
+        print("跨 Windows 用户模式：仅处理当前 Windows 用户的 Qoder CN、豆包工作与 MiniMax Code。")
         targets = []
         if bound_platforms is None or "qoder" in bound_platforms:
             targets.extend(find_qoder_accounts())
         if bound_platforms is None or "doubao" in bound_platforms:
             targets.extend(find_doubao_accounts())
+        if bound_platforms is None or "minimax" in bound_platforms:
+            targets.extend(find_minimax_accounts())
     else:
         targets = choose_targets(find_menu_targets())
     if targets is None:
         return 0
     if not targets:
         if bound_only:
-            print("❌ 当前 Windows 用户没有发现已登录的 Qoder CN 或豆包工作。")
+            print("❌ 当前 Windows 用户没有发现已登录的 Qoder CN、豆包工作或 MiniMax Code。")
         else:
             print("❌ 没有发现可签到的项目。")
         return 1

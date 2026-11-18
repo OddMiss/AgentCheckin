@@ -1,25 +1,34 @@
 # AgentCheckin
 
-一个运行于 Windows 的多客户端签到工具。它会自动发现已登录的 WorkBuddy、Trae CN、Qoder CN 和豆包工作，让你选择单项、多项或全部执行。
+一个运行于 Windows 的多客户端签到工具。它会自动发现已登录的 WorkBuddy、Trae CN、Qoder CN、豆包工作和 MiniMax Code，让你选择单项、多项或全部执行。
 
-## 功能
+## 平台一览
 
-- 自动识别本机已登录的 WorkBuddy、Trae CN、Qoder CN 和豆包工作
-- 支持单选、逗号分隔多选与全选签到
-- 自动跳过当天已签到的账号
-- 显示连续签到天数、当日获得积分和当前可用积分
-- 运行时显示 Trae CN 与 Qoder CN 的本机账号标识，不显示令牌
-- 支持 Qoder CN 的可领取积分活动福利
-- 支持 `--status` 仅查询模式，不会发起任何领取请求
-- 仅使用本机已有登录态；不会打印完整令牌，也不会上传登录信息
+| 平台 | 默认运行范围 | 输出内容 | 备注 |
+| --- | --- | --- | --- |
+| WorkBuddy | 可扫描多个 Windows 用户 | 签到状态、连签、资源包余额 | 新版加密登录态由客户端运行时在内存中读取 |
+| Trae CN | 可扫描多个 Windows 用户 | 用户名、已脱敏手机号、积分 | 按平台设备规则执行签到 |
+| Qoder CN | 当前 Windows 用户；其他用户需密码 | 用户名、活动领取结果 | 平台不提供总积分余额接口 |
+| 豆包工作 | 当前 Windows 用户；其他用户需密码 | 用户标识、已脱敏手机号、签到结果 | 使用桌面端登录态与 Playwright |
+| MiniMax Code | 当前 Windows 用户；其他用户需密码 | 用户标识、签到结果、可用 OP 积分 | OAuth 登录态可自动刷新并写回客户端原文件 |
+
+| 交互 | 行为 |
+| --- | --- |
+| 输入 `1` | 选择一项 |
+| 输入 `1,3` | 选择多项 |
+| 输入 `A`、`all`、`0` 或直接回车 | 选择列表中全部项目 |
+| `Ctrl+C` | 退出，不执行签到 |
+| `--status` | 只读模式，不发起领取；MiniMax 仅确认本机登录态，不刷新 OAuth |
 
 ## 使用条件
 
-- Windows
-- 已安装并登录相应的桌面客户端
-- Python 3
-- 首次使用 Trae CN、Qoder CN 或豆包工作时，请执行：`python -m pip install -r requirements.txt`
-- 跨 Windows 用户运行豆包工作时，启动器会自动为该用户安装所需的 Playwright Chromium；如直接运行豆包模块且提示缺少浏览器环境，请执行：`python -m playwright install chromium`
+| 条件 | 说明 |
+| --- | --- |
+| 系统 | Windows |
+| 客户端 | 已安装并登录要签到的平台客户端 |
+| Python | 可在命令行运行 `python` |
+| Python 依赖 | 首次使用 Trae CN、Qoder CN、豆包工作或 MiniMax Code 前执行 `python -m pip install -r requirements.txt` |
+| 豆包浏览器 | 跨 Windows 用户运行豆包工作时启动器会自动安装 Chromium；若直接运行模块时缺失，可执行 `python -m playwright install chromium` |
 
 ## 运行
 
@@ -35,36 +44,23 @@ python DailyCheckin.py
 python DailyCheckin.py --status
 ```
 
-WorkBuddy 会扫描以下位置中存在的登录态：
+## 登录态发现与跨用户运行
 
-```text
-C:\Users\<Windows 用户名>\AppData\Local\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info
-```
+| 平台 | 自动发现的位置 | 可直接运行的 Windows 用户 | 其他 Windows 用户 |
+| --- | --- | --- | --- |
+| WorkBuddy | `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info` | 所有已发现用户 | 直接按对应配置文件运行 |
+| Trae CN | `AppData\Roaming` 或 `AppData\Local` 下的 `TRAE SOLO CN` / `TRAE CN` | 所有已发现用户 | 直接按对应配置文件运行 |
+| Qoder CN | `AppData\Roaming` / `AppData\Local` 中的 `auth.v1.dat` 与 `Local State` | 当前用户 | 菜单单独列出，需输入该 Windows 用户密码 |
+| 豆包工作 | `%LOCALAPPDATA%` 下的豆包客户端 `Local State` | 当前用户 | 菜单单独列出，需输入该 Windows 用户密码 |
+| MiniMax Code | `~\.minimax\auth\prod\cn\mcode-public\auth.json` | 当前用户 | 菜单单独列出，需输入该 Windows 用户密码 |
 
-Trae CN 会扫描各 Windows 配置文件 `AppData\\Roaming` 或 `AppData\\Local` 下的 `TRAE SOLO CN` / `TRAE CN` 登录文件。Qoder CN 会扫描当前 Windows 用户数据目录中的 `auth.v1.dat` 与 `Local State`。豆包工作会检测当前 Windows 用户的豆包桌面客户端数据目录；其登录 Cookie 由 Windows DPAPI 保护，因此不会跨 Windows 用户读取。
+Qoder、豆包工作与 MiniMax Code 的认证或设备状态受对应 Windows 用户保护。其他用户的项目会以“需 Windows 密码”单独显示；选择后，普通项目先完成，Windows 再通过 `runas` 为该用户启动仅包含所选平台的子任务。同一 Windows 用户选中多项时只需认证一次。
 
-输入编号可选择单个项目；如输入 `1,3` 可选择多个项目；直接回车、输入 `A`、`all` 或 `0` 都会签到全部已发现项目。使用 `Ctrl+C` 退出。
-
-Qoder 的本地密钥由 Windows DPAPI 按当前 Windows 用户保护。脚本不会尝试绕过这一保护，因此其他 Windows 用户的 Qoder 登录态不会列入菜单；请在对应用户会话中运行脚本。
-
-### 在主账号中运行其他 Windows 用户的 Qoder CN / 豆包工作
-
-其他 Windows 用户中检测到 Qoder CN 或豆包工作客户端数据的账号，会在“可签到项目”中按**每个应用单独一行**列出，并标注“需 Windows 密码”。选择某一项后，脚本会先完成已选的普通项目，再由 Windows 在控制台提示输入该用户的登录密码，并为其打开独立的签到窗口；该窗口只运行你选中的应用。若同一 Windows 用户同时选中 Qoder CN 和豆包工作，仍只需认证一次。子窗口不会覆盖主账号的客户端登录态，也不会重复执行 WorkBuddy 或 Trae CN。
-
-密码由 Windows `runas` 直接接收：不会传给 Python、不会写入命令行、文件、日志或 Git。请使用该 Windows 用户的**登录密码**，而非 Windows Hello PIN；若该用户是 Microsoft 账号，Windows 会以系统识别到的登录名提示认证。
-
-### 在一个 Windows 账号中管理多个 Qoder CN 登录
-
-若希望在 `HH` 的 Windows 会话中集中签到多个 Qoder CN 账号，不能直接复制或读取其他 Windows 用户的 Qoder 登录文件。正确做法是为每个 Qoder 账号创建一个由 `HH` 管理的独立客户端配置目录：
-
-1. 完全退出所有 Qoder CN 窗口，包含系统托盘/后台进程。
-2. 双击 `open_qoder_profile.bat`，输入配置名，例如 `Villa`。
-3. **先不要登录。** 启动器会等待并验证新目录内是否生成 `Local State`。
-4. 只有窗口显示“`Isolated profile verified`”后，才在新开的 Qoder CN 中手动登录 Villa 的账号。
-5. 若提示 profile directory was not activated，立即关闭 Qoder，**不要登录**；否则登录会落入默认目录并替换 HH 的当前会话。
-6. 对其他账号重复上述操作；每个账号只需登录一次。
-
-启动器会使用 Qoder CN 的标准 `--user-data-dir` 参数，在 `%APPDATA%\AgentCheckin\QoderProfiles\<配置名>` 创建独立配置。脚本会自动发现其中的登录态，并在菜单中标注 `Qoder 配置：Villa`。这些配置仍由 HH 的 Windows DPAPI 加密，账号令牌不会写入本项目。
+| Windows 密码处理 | 行为 |
+| --- | --- |
+| 输入位置 | Windows `runas` 的系统控制台提示 |
+| Python / 命令行参数 / 日志 / Git | 不接收、不保存、不输出密码 |
+| 适用凭据 | Windows 用户登录密码；不支持 Windows Hello PIN |
 
 ## 新版 WorkBuddy 兼容性
 
@@ -99,19 +95,20 @@ WorkBuddy 用户：...  token：已加载（内容已隐藏）
 
 ## 隐私与安全
 
-WorkBuddy 登录态包含访问令牌，应视为密码处理。`.gitignore` 已排除登录态、令牌、环境变量文件、私钥、缓存和日志；提交前仍建议检查暂存文件，确认不含个人信息。
+| 项目 | 安全边界 |
+| --- | --- |
+| 通用登录态 | 令牌、Cookie、刷新令牌均应视为密码；`.gitignore` 已排除凭据、私钥、缓存、日志和 MiniMax 本地状态 |
+| `--status` | 不会发起领取；MiniMax 仅检查登录态文件存在，避免 OAuth 刷新与原地写回 |
+| WorkBuddy | 解密与令牌只在内存中短暂使用；积分查询为只读，不消耗积分 |
+| Qoder CN | 仅提供活动及可领取福利，不提供账号总积分或套餐余额；脚本不会将活动奖励误显示为余额 |
+| 豆包工作 | 只显示安全结果摘要，不显示 Cookie、令牌、客户端目录或截图路径；`doubao_data/` 永不提交。客户端锁库时，上游模块可能请求一次 Windows 管理员授权 |
+| MiniMax Code | OAuth access token 有效期较短。需要签到时，模块可使用 refresh token 刷新并**原地写回 MiniMax 客户端自身**的 `auth.json` / `auth-state.json`；不创建额外的凭据副本 |
+| 用户手机号 | 只显示客户端已有的脱敏格式；绝不输出完整手机号 |
 
-本项目会向你选择的平台发送签到或领取请求；`--status` 模式则只查询状态。WorkBuddy 的积分查询为只读操作，不会消耗积分。
-
-Trae CN 与 Qoder CN 的本地登录态和签到逻辑参考本机项目 `D:\AI_Data\workbuddy-trae-auto-signin`，并已按本项目的多账号交互流程重新整合。这是非官方个人工具；客户端存储格式和接口可能随版本变动，请自行遵守各平台服务条款并在异常时停止使用。
-
-Qoder CN 的活动接口仅提供活动及其可领取福利，不提供账号总积分或套餐余额。因此脚本会准确报告活动领取结果，但不会把“可领取活动积分”误显示为“当前剩余积分”。
-
-豆包工作签到通过本机豆包桌面客户端登录态运行。运行时只显示最终签到结果，不显示 Cookie、令牌、客户端目录或截图路径。模块的 `doubao_data/` 目录可能包含受当前 Windows 用户 DPAPI 保护的 Cookie 缓存、日志和结果截图，已由 `.gitignore` 排除，不能上传或共享。若豆包客户端正在占用 Cookie 数据库且本机没有可用缓存，上游模块可能请求一次 Windows 管理员授权以读取锁定文件；请只在确认该提示来自本项目时同意。
-
-豆包工作会显示页面可见的账号标识。手机号只显示脱敏形式；若豆包页面没有直接提供手机号，脚本仅会在同一 Windows 用户下、且豆包与 Trae CN 的账号标识完全一致时复用 Trae 客户端已脱敏的手机号，否则显示“未提供”。
+这是非官方个人工具。客户端存储格式和接口可能随版本变动；请仅用于自己的账号，遵守平台服务条款，并在异常时停止使用。
 
 ## 参考来源
 
 - 签到接口方案参考：[WorkBuddy 积分焦虑终结者：让 AI 每天自动签到领积分，一次配置永久躺赚](https://developer.cloud.tencent.com/article/2734615)
 - 豆包工作模块参考并保留来源：[tututashu/doubao-auto-checkin](https://github.com/tututashu/doubao-auto-checkin)（MIT License；完整许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）
+- MiniMax Code 模块参考本机项目 `D:\AI_Data\AIAutomator`（MIT License；完整许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）
