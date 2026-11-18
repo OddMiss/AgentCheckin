@@ -71,6 +71,7 @@ QODER_EXPIRY_MARGIN = 300.0
 QODER_PROFILE_ROOT_ENV = "QODER_PROFILE_ROOT"
 DOUBAO_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "doubao_checkin.py")
 BOUND_CHECKIN_BATCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_bound_checkin.bat")
+BOUND_PLATFORM_KEYS = {"Qoder CN": "qoder", "豆包工作": "doubao"}
 
 # Trae 客户端加密格式中使用的固定参数。它们不是账号密钥；实际会话令牌仍只
 # 在进程内短暂使用，永不输出或写入文件。
@@ -646,12 +647,17 @@ def find_menu_targets():
     """构造主菜单：常规项目加上需切换 Windows 身份的受保护项目。"""
     targets = find_checkin_targets()
     for account in find_other_windows_bound_accounts():
-        targets.append({
-            "platform": "、".join(account["platforms"]),
-            "windows_user": account["windows_user"],
-            "requires_windows_password": True,
-            "bound_account": account,
-        })
+        for platform in account["platforms"]:
+            # 每个平台单独一行；后续若同一 Windows 用户选择多项，只认证一次。
+            bound_account = dict(account)
+            bound_account["platforms"] = (platform,)
+            bound_account["bound_platforms"] = (BOUND_PLATFORM_KEYS[platform],)
+            targets.append({
+                "platform": platform,
+                "windows_user": account["windows_user"],
+                "requires_windows_password": True,
+                "bound_account": bound_account,
+            })
     return targets
 
 
@@ -806,9 +812,15 @@ def launch_bound_checkin_as_windows_user(account):
         print("❌ 找不到跨 Windows 用户启动器。")
         return False
     logon_name = resolve_windows_logon_name(account["profile_path"], account["windows_user"])
+    platform_keys = tuple(account.get("bound_platforms") or
+                          (BOUND_PLATFORM_KEYS[name] for name in account["platforms"]))
+    if not platform_keys or any(key not in ("qoder", "doubao") for key in platform_keys):
+        print("❌ 跨 Windows 用户的平台配置无效。")
+        return False
     # 密码由 runas 直接在 Windows 控制台读取；绝不作为 Python 参数、变量或日志内容。
     # 显式传入当前可用的 Python，避免目标 Windows 用户的 PATH 未配置 Python。
-    command = 'cmd.exe /d /k ""%s" "%s""' % (BOUND_CHECKIN_BATCH, sys.executable)
+    command = 'cmd.exe /d /k ""%s" "%s" "%s""' % (
+        BOUND_CHECKIN_BATCH, sys.executable, ",".join(platform_keys))
     print("\n🔐 Windows 将提示输入 %s 的登录密码（输入不会显示或保存）。" % logon_name)
     print("   新窗口只会运行：%s" % "、".join(account["platforms"]))
     try:
@@ -1247,10 +1259,23 @@ def checkin_workbuddy_status(account):
 
 def main():
     allowed_options = ("--status", "--bound-only")
-    unknown_options = [option for option in sys.argv[1:] if option not in allowed_options]
+    bound_platform_options = [option for option in sys.argv[1:]
+                              if option.startswith("--bound-platforms=")]
+    unknown_options = [option for option in sys.argv[1:]
+                       if option not in allowed_options and not option.startswith("--bound-platforms=")]
     if unknown_options:
-        print("用法：python DailyCheckin.py [--status] [--bound-only]")
+        print("用法：python DailyCheckin.py [--status] [--bound-only] [--bound-platforms=qoder,doubao]")
         return 2
+    if len(bound_platform_options) > 1:
+        print("❌ --bound-platforms 只能提供一次。")
+        return 2
+    bound_platforms = None
+    if bound_platform_options:
+        bound_platforms = {item.strip().lower() for item in
+                           bound_platform_options[0].split("=", 1)[1].split(",") if item.strip()}
+        if not bound_platforms or not bound_platforms <= {"qoder", "doubao"}:
+            print("❌ --bound-platforms 仅支持 qoder,doubao。")
+            return 2
     status_only = "--status" in sys.argv[1:]
     bound_only = "--bound-only" in sys.argv[1:]
     print("AgentCheckin 每日签到  %s" % time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -1259,7 +1284,11 @@ def main():
     password_targets = []
     if bound_only:
         print("跨 Windows 用户模式：仅处理当前 Windows 用户的 Qoder CN 与豆包工作。")
-        targets = find_qoder_accounts() + find_doubao_accounts()
+        targets = []
+        if bound_platforms is None or "qoder" in bound_platforms:
+            targets.extend(find_qoder_accounts())
+        if bound_platforms is None or "doubao" in bound_platforms:
+            targets.extend(find_doubao_accounts())
     else:
         targets = choose_targets(find_menu_targets())
     if targets is None:
@@ -1283,17 +1312,31 @@ def main():
         results.append((platform, windows_user, code, message))
 
     all_succeeded = all(code == 0 for _, _, code, _ in results)
-    for target in password_targets:
-        platform = target.get("platform", "受保护客户端")
-        windows_user = target.get("windows_user") or "未填写"
-        if status_only:
-            results.append((platform, windows_user, 0, "仅查询模式：未切换 Windows 用户"))
-            continue
-        if launch_bound_checkin_as_windows_user(target["bound_account"]):
-            results.append((platform, windows_user, 0, "已启动 Windows 签到窗口"))
-        else:
-            results.append((platform, windows_user, 1, "未启动 Windows 签到窗口"))
-            all_succeeded = False
+    if status_only:
+        for target in password_targets:
+            results.append((target.get("platform", "受保护客户端"),
+                            target.get("windows_user") or "未填写", 0,
+                            "仅查询模式：未切换 Windows 用户"))
+    else:
+        # 同一 Windows 用户的多个已选平台只认证一次，并且只传给子任务已选的平台。
+        grouped = {}
+        for target in password_targets:
+            account = target["bound_account"]
+            key = os.path.normcase(os.path.abspath(account["profile_path"]))
+            group = grouped.setdefault(key, {"account": dict(account), "targets": []})
+            group["targets"].append(target)
+        for group in grouped.values():
+            account, selected_targets = group["account"], group["targets"]
+            account["platforms"] = tuple(target["platform"] for target in selected_targets)
+            account["bound_platforms"] = tuple(
+                BOUND_PLATFORM_KEYS[target["platform"]] for target in selected_targets)
+            started = launch_bound_checkin_as_windows_user(account)
+            for target in selected_targets:
+                results.append((target["platform"], target["windows_user"],
+                                0 if started else 1,
+                                "已启动 Windows 签到窗口" if started else "未启动 Windows 签到窗口"))
+            if not started:
+                all_succeeded = False
 
     print("\n签到结果汇总：")
     for platform, windows_user, code, message in results:

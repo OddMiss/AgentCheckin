@@ -49,7 +49,7 @@ Qoder 的本地密钥由 Windows DPAPI 按当前 Windows 用户保护。脚本�
 
 ### 在主账号中运行其他 Windows 用户的 Qoder CN / 豆包工作
 
-其他 Windows 用户中检测到 Qoder CN 或豆包工作客户端数据的账号，会直接列在“可签到项目”中，并标注“需 Windows 密码”。选择该项目后，脚本会先完成已选的普通项目，再由 Windows 在控制台提示输入该用户的登录密码，并为其打开独立的签到窗口。该窗口只处理 Qoder CN 和豆包工作，因此不会覆盖主账号的客户端登录态，也不会重复执行 WorkBuddy 或 Trae CN。
+其他 Windows 用户中检测到 Qoder CN 或豆包工作客户端数据的账号，会在“可签到项目”中按**每个应用单独一行**列出，并标注“需 Windows 密码”。选择某一项后，脚本会先完成已选的普通项目，再由 Windows 在控制台提示输入该用户的登录密码，并为其打开独立的签到窗口；该窗口只运行你选中的应用。若同一 Windows 用户同时选中 Qoder CN 和豆包工作，仍只需认证一次。子窗口不会覆盖主账号的客户端登录态，也不会重复执行 WorkBuddy 或 Trae CN。
 
 密码由 Windows `runas` 直接接收：不会传给 Python、不会写入命令行、文件、日志或 Git。请使用该 Windows 用户的**登录密码**，而非 Windows Hello PIN；若该用户是 Microsoft 账号，Windows 会以系统识别到的登录名提示认证。
 
