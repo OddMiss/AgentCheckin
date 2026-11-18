@@ -69,6 +69,7 @@ QODER_CAMPAIGNS_PATH = "/sash/api/v1/me/campaigns"
 QODER_REFRESH_PATH = "/api/v1/deviceToken/refresh"
 QODER_EXPIRY_MARGIN = 300.0
 QODER_PROFILE_ROOT_ENV = "QODER_PROFILE_ROOT"
+DOUBAO_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "doubao_checkin.py")
 
 # Trae 客户端加密格式中使用的固定参数。它们不是账号密钥；实际会话令牌仍只
 # 在进程内短暂使用，永不输出或写入文件。
@@ -628,7 +629,7 @@ def find_windows_accounts(users_dir=None):
 
 
 def find_checkin_targets():
-    """汇总三个平台的本机登录态，按平台和 Windows 用户分别显示。"""
+    """汇总各平台的本机登录态，按平台和 Windows 用户分别显示。"""
     targets = []
     for account in find_windows_accounts():
         target = dict(account)
@@ -636,7 +637,86 @@ def find_checkin_targets():
         targets.append(target)
     targets.extend(find_trae_accounts())
     targets.extend(find_qoder_accounts())
+    targets.extend(find_doubao_accounts())
     return targets
+
+
+def find_doubao_accounts():
+    """发现当前 Windows 用户已安装且存有客户端数据的豆包工作。
+
+    豆包客户端登录 Cookie 由 Windows DPAPI 保护，不能也不应跨 Windows 用户读取。
+    这里只判断客户端数据目录是否存在，不读取、解密或输出登录态。
+    """
+    local_app_data = os.environ.get(
+        "LOCALAPPDATA", os.path.join(os.path.expanduser("~"), "AppData", "Local"))
+    if not os.path.isdir(local_app_data):
+        return []
+    try:
+        candidates = os.scandir(local_app_data)
+        for entry in candidates:
+            if not entry.is_dir() or "doubao" not in entry.name.lower():
+                continue
+            root = entry.path
+            if (os.path.isfile(os.path.join(root, "Local State")) or
+                    os.path.isfile(os.path.join(root, "User Data", "Local State"))):
+                return [{"platform": "豆包工作", "windows_user": CURRENT_WINDOWS_USER}]
+    except OSError:
+        pass
+    return []
+
+
+def _doubao_result_from_output(output):
+    """提取上游模块的最终 JSON 结果，过程日志绝不回显。"""
+    for line in reversed((output or "").splitlines()):
+        try:
+            result = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(result, dict) and isinstance(result.get("result"), str):
+            return result
+    return None
+
+
+def checkin_doubao(account, status_only=False):
+    """调用独立的豆包工作模块，并只显示无凭据的最终状态。"""
+    print("Windows 账号：%s" % (account.get("windows_user") or "未填写"))
+    if status_only:
+        print("ℹ️  已发现豆包工作客户端（仅查询模式不读取登录态，也不会签到）。")
+        return 0, "仅查询：已发现客户端"
+    if not os.path.isfile(DOUBAO_SCRIPT):
+        print("❌ 找不到豆包工作签到模块。")
+        return 3, "签到模块缺失"
+    try:
+        completed = subprocess.run(
+            [sys.executable, DOUBAO_SCRIPT, "run"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=720,
+        )
+    except subprocess.TimeoutExpired:
+        print("❌ 豆包工作签到超时。")
+        return 4, "签到超时"
+    except OSError as error:
+        print("❌ 无法启动豆包工作签到：%s" % error)
+        return 4, "无法启动签到模块"
+
+    result = _doubao_result_from_output(completed.stdout)
+    if result:
+        state = result.get("result")
+        report = result.get("report")
+        if not isinstance(report, str) or not report.strip():
+            report = "未提供结果说明"
+        # 上游结果可能带本机截图路径和诊断细节；统一入口仅显示安全的报告文字。
+        if state in ("success", "already"):
+            print("✅ 豆包工作：%s" % report.strip())
+            return 0, "签到成功" if state == "success" else "今天已签到"
+        print("❌ 豆包工作签到未完成：%s" % report.strip())
+        return 5, "签到未完成"
+
+    if completed.returncode != 0:
+        print("❌ 豆包工作签到模块异常退出（未获得可识别结果）。")
+        return 5, "签到模块异常"
+    print("❌ 豆包工作签到结果无法识别。")
+    return 5, "结果无法识别"
 
 
 def load_auth(auth_file):
@@ -885,7 +965,7 @@ def checkin(account):
 def choose_targets(targets):
     """让用户按编号选择一个、多个或全部平台账号。"""
     if not targets:
-        print("❌ 没有发现已登录的 WorkBuddy、Trae CN 或 Qoder CN。")
+        print("❌ 没有发现已登录的 WorkBuddy、Trae CN、Qoder CN 或豆包工作。")
         return None
 
     print("\n可签到项目：")
@@ -941,6 +1021,8 @@ def checkin_target(target, status_only=False):
         return checkin_trae(target, status_only=status_only)
     if platform == "Qoder CN":
         return checkin_qoder(target, status_only=status_only)
+    if platform == "豆包工作":
+        return checkin_doubao(target, status_only=status_only)
     print("❌ 不支持的平台：%s" % platform)
     return 3, "平台配置错误"
 

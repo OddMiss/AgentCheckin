@@ -1,2 +1,6 @@
 # Trae CN 和 Qoder CN 本机登录态解密
 cryptography>=42
+
+# 豆包工作客户端登录态读取与签到页面自动化
+playwright>=1.40
+pycryptodome>=3.20

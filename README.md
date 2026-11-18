@@ -1,10 +1,10 @@
 # AgentCheckin
 
-一个运行于 Windows 的多客户端签到工具。它会自动发现已登录的 WorkBuddy、Trae CN 和 Qoder CN，让你选择单项、多项或全部执行。
+一个运行于 Windows 的多客户端签到工具。它会自动发现已登录的 WorkBuddy、Trae CN、Qoder CN 和豆包工作，让你选择单项、多项或全部执行。
 
 ## 功能
 
-- 自动识别本机已登录的 WorkBuddy、Trae CN 和 Qoder CN
+- 自动识别本机已登录的 WorkBuddy、Trae CN、Qoder CN 和豆包工作
 - 支持单选、逗号分隔多选与全选签到
 - 自动跳过当天已签到的账号
 - 显示连续签到天数、当日获得积分和当前可用积分
@@ -18,7 +18,8 @@
 - Windows
 - 已安装并登录相应的桌面客户端
 - Python 3
-- 首次使用 Trae CN 或 Qoder CN 时，请执行：`python -m pip install -r requirements.txt`
+- 首次使用 Trae CN、Qoder CN 或豆包工作时，请执行：`python -m pip install -r requirements.txt`
+- 首次使用豆包工作时，如提示缺少浏览器运行环境，请再执行：`python -m playwright install chromium`
 
 ## 运行
 
@@ -40,7 +41,7 @@ WorkBuddy 会扫描以下位置中存在的登录态：
 C:\Users\<Windows 用户名>\AppData\Local\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info
 ```
 
-Trae CN 会扫描各 Windows 配置文件 `AppData\\Roaming` 或 `AppData\\Local` 下的 `TRAE SOLO CN` / `TRAE CN` 登录文件。Qoder CN 会扫描当前 Windows 用户数据目录中的 `auth.v1.dat` 与 `Local State`。
+Trae CN 会扫描各 Windows 配置文件 `AppData\\Roaming` 或 `AppData\\Local` 下的 `TRAE SOLO CN` / `TRAE CN` 登录文件。Qoder CN 会扫描当前 Windows 用户数据目录中的 `auth.v1.dat` 与 `Local State`。豆包工作会检测当前 Windows 用户的豆包桌面客户端数据目录；其登录 Cookie 由 Windows DPAPI 保护，因此不会跨 Windows 用户读取。
 
 输入编号可选择单个项目；如输入 `1,3` 可选择多个项目；直接回车、输入 `A`、`all` 或 `0` 都会签到全部已发现项目。使用 `Ctrl+C` 退出。
 
@@ -100,6 +101,9 @@ Trae CN 与 Qoder CN 的本地登录态和签到逻辑参考本机项目 `D:\AI_
 
 Qoder CN 的活动接口仅提供活动及其可领取福利，不提供账号总积分或套餐余额。因此脚本会准确报告活动领取结果，但不会把“可领取活动积分”误显示为“当前剩余积分”。
 
+豆包工作签到通过本机豆包桌面客户端登录态运行。运行时只显示最终签到结果，不显示 Cookie、令牌、客户端目录或截图路径。模块的 `doubao_data/` 目录可能包含受当前 Windows 用户 DPAPI 保护的 Cookie 缓存、日志和结果截图，已由 `.gitignore` 排除，不能上传或共享。若豆包客户端正在占用 Cookie 数据库且本机没有可用缓存，上游模块可能请求一次 Windows 管理员授权以读取锁定文件；请只在确认该提示来自本项目时同意。
+
 ## 参考来源
 
 - 签到接口方案参考：[WorkBuddy 积分焦虑终结者：让 AI 每天自动签到领积分，一次配置永久躺赚](https://developer.cloud.tencent.com/article/2734615)
+- 豆包工作模块参考并保留来源：[tututashu/doubao-auto-checkin](https://github.com/tututashu/doubao-auto-checkin)（MIT License；完整许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）

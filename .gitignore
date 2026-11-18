@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *.log
+doubao_data/
 
 # WorkBuddy login state and other credentials
 workbuddy-desktop.info
