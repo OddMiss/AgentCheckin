@@ -928,6 +928,17 @@ def checkin(start_url: str, action: str) -> int:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.set_default_timeout(20000)
 
+            # 活动页不一定带左侧账号栏。先读取首页的可见账号标识；失败不影响
+            # 后续签到，且只保留用户名和脱敏手机号，不记录页面正文或 Cookie。
+            identity = {}
+            if start_url != START_URL:
+                try:
+                    page.goto(START_URL, wait_until="domcontentloaded", timeout=15000)
+                    page.wait_for_timeout(1000)
+                    identity = page_identity(page)
+                except Exception:
+                    log("未能从首页读取账号标识，继续签到")
+
             log(f"打开页面: {start_url}")
             if not goto_with_retry(page, start_url):
                 emit({"result": "NETWORK", "report": REPORTS["NETWORK"]}, action)
@@ -939,7 +950,7 @@ def checkin(start_url: str, action: str) -> int:
             # 客户端专属活动检测: 页面出现拦截文案说明当前通道未通过客户端校验
             # (正常只会在网页登录态模式发生; 客户端凭据模式带 SamanthaDoubao UA 不应触发)
             body = page_text(page)
-            identity = page_identity(page)
+            identity.update(page_identity(page))
             if "仅支持在豆包电脑版" in body:
                 shot = SHOT_DIR / f"client-only-{datetime.datetime.now():%Y%m%d-%H%M%S}.png"
                 SHOT_DIR.mkdir(parents=True, exist_ok=True)
