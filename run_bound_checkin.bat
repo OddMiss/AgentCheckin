@@ -24,6 +24,24 @@ if defined PYTHON_EXE (
 
 set "CHECKIN_ARGS=--bound-only"
 if defined BOUND_PLATFORMS set "CHECKIN_ARGS=%CHECKIN_ARGS% --bound-platforms=%BOUND_PLATFORMS%"
+
+set "NEEDS_DOUBAO_BROWSER=0"
+if defined BOUND_PLATFORMS (
+    echo(%BOUND_PLATFORMS%| findstr /i /c:"doubao" >nul
+    if not errorlevel 1 set "NEEDS_DOUBAO_BROWSER=1"
+) else (
+    set "NEEDS_DOUBAO_BROWSER=1"
+)
+if "%NEEDS_DOUBAO_BROWSER%"=="1" (
+    echo Preparing the Playwright Chromium browser for this Windows user...
+    "%PYTHON_EXE%" -m playwright install chromium
+    if errorlevel 1 (
+        echo Playwright Chromium installation failed. Check this user's network access, then try again.
+        pause
+        exit /b 9010
+    )
+)
+
 "%PYTHON_EXE%" -X utf8 "%~dp0DailyCheckin.py" %CHECKIN_ARGS%
 set "CHECKIN_EXIT_CODE=%ERRORLEVEL%"
 

@@ -19,7 +19,7 @@
 - 已安装并登录相应的桌面客户端
 - Python 3
 - 首次使用 Trae CN、Qoder CN 或豆包工作时，请执行：`python -m pip install -r requirements.txt`
-- 首次使用豆包工作时，如提示缺少浏览器运行环境，请再执行：`python -m playwright install chromium`
+- 跨 Windows 用户运行豆包工作时，启动器会自动为该用户安装所需的 Playwright Chromium；如直接运行豆包模块且提示缺少浏览器环境，请执行：`python -m playwright install chromium`
 
 ## 运行
 
