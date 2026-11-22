@@ -184,8 +184,9 @@ def decrypt_workbuddy_value(value):
     try:
         result = subprocess.run(
             [executable, "-e", WORKBUDDY_DECRYPT_HELPER],
-            input=json.dumps(value, separators=(",", ":")),
-            text=True,
+            # WorkBuddy 的 Electron 运行时固定以 UTF-8 写出；不能交给
+            # Windows 当前控制台编码（常为 GBK）自动解码，否则中文昵称会读取失败。
+            input=json.dumps(value, separators=(",", ":")).encode("utf-8"),
             capture_output=True,
             timeout=20,
             env=environment,
@@ -196,7 +197,7 @@ def decrypt_workbuddy_value(value):
 
     if result.returncode != 0 or not result.stdout:
         return None, "WorkBuddy 客户端无法解开加密登录态"
-    return result.stdout, None
+    return result.stdout.decode("utf-8", errors="replace"), None
 
 
 def require_crypto():
@@ -1049,10 +1050,15 @@ def load_auth(auth_file):
     expires = data.get("auth", {}).get("expiresAt", 0)
     if isinstance(expires, (int, float)) and expires < (time.time() * 1000 + 5 * 60 * 1000):
         return None, "accessToken 快过期或已过期，请先打开一次 WorkBuddy 刷新登录态"
-    nickname = data.get("account", {}).get("nickname", "")
-    # 昵称不影响接口鉴权；新版若将其加密，回退显示 uid，避免解封无关个人信息。
+    nickname, _nickname_error = decrypt_workbuddy_value(
+        data.get("account", {}).get("nickname", "")
+    )
+    # WorkBuddy 新版会把昵称和 accessToken 一起加密。昵称仅用于本机控制台
+    # 显示，解密失败不影响签到；此时仍安全地回退显示 uid 的前 8 位。
     if not isinstance(nickname, str):
         nickname = ""
+    else:
+        nickname = nickname.strip()
     return {"token": tok, "uid": uid, "nickname": nickname}, None
 
 
